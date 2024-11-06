@@ -1,7 +1,11 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QLabel, QFileDialog
+import socket
+import threading
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, \
+    QLabel, QFileDialog
 from PyQt5.QtCore import Qt
 from pynput import keyboard
+
 
 class ChatApp(QWidget):
     def __init__(self):
@@ -11,12 +15,19 @@ class ChatApp(QWidget):
         self.listener = keyboard.Listener(on_press=self.on_key_press)
         self.listener.start()  # Start the keyboard listener
 
+        # Network setup
+        self.client_socket = None
+        self.server_ip = '10.10.217.196'  # Change this to the server's IP
+        self.server_port = 5001
+        self.client_ip = None
+        self.connect_to_server()
+
     def init_ui(self):
         self.setWindowTitle('Chat App')
         self.setGeometry(100, 100, 400, 600)
 
         # Set a solid background color with border and rounded corners
-        self.setStyleSheet("""
+        self.setStyleSheet("""  
             QWidget {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(30, 30, 30, 255), stop:1 rgba(50, 50, 50, 255));
                 border: 2px solid rgba(255, 255, 255, 0.5);
@@ -114,7 +125,7 @@ class ChatApp(QWidget):
 
     def on_key_press(self, key):
         try:
-            if key == keyboard.Key.f7:  # Use F12 key to open the window
+            if key == keyboard.Key.ctrl_r:  # Use F12 key to open the window
                 print("Attempting to open chat window...")  # Debug message
                 self.toggle_visibility()
         except AttributeError:
@@ -130,8 +141,12 @@ class ChatApp(QWidget):
 
     def send_message(self):
         message = self.input_area.toPlainText()
-        if message:
-            self.chat_display.addItem(message)
+        if message and self.client_socket:
+            # Send message to the server in the format "recipient_ip:message"
+            recipient_ip = '192.168.56.1'  # Just an example, you could allow the user to select the recipient
+            message_to_send = f"{recipient_ip}:{message}"
+            self.client_socket.send(message_to_send.encode('utf-8'))
+            self.chat_display.addItem(f"You: {message}")
             self.input_area.clear()
 
     def attach_file(self):
@@ -140,7 +155,32 @@ class ChatApp(QWidget):
         if file_name:
             self.chat_display.addItem(f"Attached: {file_name}")
 
-if __name__ == '__main__':
+    def connect_to_server(self):
+        """Connects to the server and starts the listening thread."""
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.client_socket.connect((self.server_ip, self.server_port))
+            print(f"Connected to server at {self.server_ip}:{self.server_port}")
+            self.client_ip = self.client_socket.getsockname()[0]  # Get local IP address
+
+            # Start the receiving thread to listen for incoming messages
+            threading.Thread(target=self.receive_messages, daemon=True).start()
+        except ConnectionRefusedError:
+            print("Server is not available. Please make sure the server is running.")
+
+    def receive_messages(self):
+        """Listens for messages from the server and updates the UI."""
+        while True:
+            try:
+                message = self.client_socket.recv(1024).decode('utf-8')
+                if message:
+                    self.chat_display.addItem(f"Received: {message}")
+            except Exception as e:
+                print(f"Error receiving message: {e}")
+                break
+
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # Set a fusion style for better aesthetics
     window = ChatApp()
